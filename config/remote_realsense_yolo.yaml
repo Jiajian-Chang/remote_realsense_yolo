@@ -1,0 +1,23 @@
+# Configuration file for Remote RealSense YOLO node
+
+remote_realsense_yolo_node:
+  ros__parameters:
+    # YOLO model parameters
+    yolo_model_path: "/path/to/yolo/model.weights"
+    yolo_config_path: "/path/to/yolo/model.cfg"
+    yolo_classes_path: "/path/to/yolo/classes.names"
+    confidence_threshold: 0.5
+    nms_threshold: 0.4
+    
+    # Camera parameters
+    camera_topic: "/camera/color/image_raw"
+    image_width: 640
+    image_height: 480
+    
+    # Detection parameters
+    publish_visualization: true
+    visualization_topic: "/detections/visualization"
+    
+    # Performance parameters
+    max_detection_fps: 30.0
+    enable_gpu: false
