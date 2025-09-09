@@ -12,6 +12,7 @@ from sensor_msgs.msg import Image, CompressedImage
 from vision_msgs.msg import Detection2DArray, Detection2D, ObjectHypothesisWithPose
 from cv_bridge import CvBridge
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy
+from ultralytics import YOLO
 import cv2
 import numpy as np
 
@@ -27,11 +28,10 @@ class RemoteRealSenseYOLONode(Node):
         # Declare parameters with default values
         self.declare_parameter('image_topic', '/camera/image_raw/compressed')
         self.declare_parameter('use_compressed', True)
-        self.declare_parameter('yolo_model_path', '/path/to/yolo/model.weights')
-        self.declare_parameter('yolo_config_path', '/path/to/yolo/model.cfg')
-        self.declare_parameter('yolo_classes_path', '/path/to/yolo/classes.names')
-        self.declare_parameter('confidence_threshold', 0.5)
-        self.declare_parameter('nms_threshold', 0.4)
+        self.declare_parameter('yolo_model', 'yolo11n.pt')  # Ultralytics YOLO model
+        self.declare_parameter('yolo_confidence', 0.5)
+        self.declare_parameter('yolo_iou_threshold', 0.4)
+        self.declare_parameter('detect_person_only', True)  # Focus on person detection
         self.declare_parameter('image_width', 640)
         self.declare_parameter('image_height', 480)
         self.declare_parameter('publish_visualization', True)
@@ -97,8 +97,9 @@ class RemoteRealSenseYOLONode(Node):
                 10
             )
         
-        # Initialize YOLO (placeholder - you'll need to implement actual YOLO)
+        # Initialize YOLO model
         self.yolo_initialized = False
+        self.yolo_model = None
         self.init_yolo()
         
         # Initialize image window if enabled
@@ -120,16 +121,17 @@ class RemoteRealSenseYOLONode(Node):
 
     def init_yolo(self):
         """
-        Initialize YOLO model.
-        This is a placeholder - implement your YOLO initialization here.
+        Initialize Ultralytics YOLO model.
         """
         try:
-            # TODO: Initialize your YOLO model here
-            # Example:
-            # self.net = cv2.dnn.readNet('yolo.weights', 'yolo.cfg')
-            # self.classes = self.load_classes('coco.names')
+            # Get YOLO model parameter
+            yolo_model = self.get_parameter('yolo_model').get_parameter_value().string_value
+            
+            # Load YOLO model
+            self.yolo_model = YOLO(yolo_model)
+            
             self.yolo_initialized = True
-            self.get_logger().info('YOLO model initialized successfully')
+            self.get_logger().info(f'YOLO model initialized successfully: {yolo_model}')
         except Exception as e:
             self.get_logger().error(f'Failed to initialize YOLO: {str(e)}')
             self.yolo_initialized = False
@@ -142,35 +144,66 @@ class RemoteRealSenseYOLONode(Node):
             msg: sensor_msgs/Image or sensor_msgs/CompressedImage message
         """
         try:
+            # Debug: Log message info
+            self.get_logger().debug(f'Received image message: type={type(msg).__name__}, '
+                                  f'header.stamp={msg.header.stamp.sec}.{msg.header.stamp.nanosec}, '
+                                  f'header.frame_id={msg.header.frame_id}')
+            
             # Convert ROS image to OpenCV format based on message type
             if self.use_compressed:
                 # Handle compressed image
+                self.get_logger().debug(f'Processing compressed image: data_size={len(msg.data)} bytes, '
+                                      f'format={msg.format}')
                 np_arr = np.frombuffer(msg.data, np.uint8)
                 cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                 if cv_image is None:
                     self.get_logger().warn('Failed to decode compressed image')
                     return
+                self.get_logger().debug(f'Decoded compressed image: shape={cv_image.shape}, dtype={cv_image.dtype}')
             else:
                 # Handle regular image
+                self.get_logger().debug(f'Processing regular image: width={msg.width}, height={msg.height}, '
+                                      f'encoding={msg.encoding}, step={msg.step}')
                 cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+                self.get_logger().debug(f'Converted regular image: shape={cv_image.shape}, dtype={cv_image.dtype}')
             
-            # Display image in window if enabled
-            if self.show_image_window:
-                self.display_image(cv_image)
-            
+            # Perform YOLO detection if initialized
+            detections = []
             if self.yolo_initialized:
-                # Perform YOLO detection
+                self.get_logger().debug('Starting YOLO detection...')
                 detections = self.perform_yolo_detection(cv_image)
+                self.get_logger().debug(f'YOLO detection completed: found {len(detections)} objects')
                 
                 # Publish detections
                 self.publish_detections(detections, msg.header)
+                self.get_logger().debug(f'Published {len(detections)} detections')
+                
+                # Log detection results
+                if detections:
+                    person_count = sum(1 for det in detections if det['class_name'] == 'person')
+                    self.get_logger().info(f'Detected {person_count} person(s) and {len(detections)} total objects')
+                    # Debug: Log individual detections
+                    for i, det in enumerate(detections):
+                        self.get_logger().debug(f'Detection {i}: {det["class_name"]} '
+                                              f'(conf={det["confidence"]:.3f}, '
+                                              f'bbox=({det["bbox"]["x1"]:.1f},{det["bbox"]["y1"]:.1f},'
+                                              f'{det["bbox"]["x2"]:.1f},{det["bbox"]["y2"]:.1f}))')
+            else:
+                self.get_logger().debug('YOLO not initialized, skipping detection')
+            
+            # Display image in window if enabled (with detections overlay)
+            if self.show_image_window:
+                self.get_logger().debug('Displaying image with detections overlay')
+                self.display_image(cv_image, detections)
+            else:
+                self.get_logger().debug('Image window disabled, skipping display')
             
         except Exception as e:
-            self.get_logger().error(f'Error processing image: {str(e)}')
+            self.get_logger().error(f'Error processing image: {str(e)}', exc_info=True)
 
     def perform_yolo_detection(self, image):
         """
-        Perform YOLO object detection on the input image.
+        Perform YOLO object detection on the input image using Ultralytics YOLO.
         
         Args:
             image: OpenCV image (numpy array)
@@ -178,15 +211,59 @@ class RemoteRealSenseYOLONode(Node):
         Returns:
             list: List of detection results
         """
-        # TODO: Implement actual YOLO detection
-        # This is a placeholder that returns empty detections
         detections = []
         
-        # Example detection (remove this when implementing real YOLO):
-        # if len(image.shape) == 3:
-        #     height, width = image.shape[:2]
-        #     # Add your YOLO inference code here
-        #     pass
+        if not self.yolo_initialized or self.yolo_model is None:
+            return detections
+        
+        try:
+            # Get detection parameters
+            confidence = self.get_parameter('yolo_confidence').get_parameter_value().double_value
+            iou_threshold = self.get_parameter('yolo_iou_threshold').get_parameter_value().double_value
+            detect_person_only = self.get_parameter('detect_person_only').get_parameter_value().bool_value
+            
+            # Run YOLO inference
+            results = self.yolo_model(image, conf=confidence, iou=iou_threshold, verbose=False)
+            
+            # Process results
+            for result in results:
+                if result.boxes is not None:
+                    boxes = result.boxes
+                    
+                    for i in range(len(boxes)):
+                        # Get box coordinates and confidence
+                        box = boxes.xyxy[i].cpu().numpy()  # x1, y1, x2, y2
+                        conf = boxes.conf[i].cpu().numpy()
+                        cls = int(boxes.cls[i].cpu().numpy())
+                        
+                        # Get class name
+                        class_name = self.yolo_model.names[cls]
+                        
+                        # Filter for person detection if requested
+                        if detect_person_only and class_name != 'person':
+                            continue
+                        
+                        # Create detection result
+                        detection = {
+                            'class_id': cls,
+                            'class_name': class_name,
+                            'confidence': float(conf),
+                            'bbox': {
+                                'x1': float(box[0]),
+                                'y1': float(box[1]),
+                                'x2': float(box[2]),
+                                'y2': float(box[3]),
+                                'width': float(box[2] - box[0]),
+                                'height': float(box[3] - box[1]),
+                                'center_x': float((box[0] + box[2]) / 2),
+                                'center_y': float((box[1] + box[3]) / 2)
+                            }
+                        }
+                        
+                        detections.append(detection)
+            
+        except Exception as e:
+            self.get_logger().error(f'Error in YOLO detection: {str(e)}')
         
         return detections
 
@@ -205,53 +282,94 @@ class RemoteRealSenseYOLONode(Node):
             detection_2d = Detection2D()
             detection_2d.header = header
             
-            # TODO: Fill in detection data based on your YOLO output format
-            # Example:
-            # detection_2d.bbox.center.position.x = detection['center_x']
-            # detection_2d.bbox.center.position.y = detection['center_y']
-            # detection_2d.bbox.size_x = detection['width']
-            # detection_2d.bbox.size_y = detection['height']
+            # Set bounding box information
+            bbox = detection['bbox']
+            detection_2d.bbox.center.x = float(bbox['center_x'])
+            detection_2d.bbox.center.y = float(bbox['center_y'])
+            # Optional: set orientation to 0 since we don't estimate rotation
+            detection_2d.bbox.center.theta = 0.0
+            detection_2d.bbox.size_x = float(bbox['width'])
+            detection_2d.bbox.size_y = float(bbox['height'])
             
-            # hypothesis = ObjectHypothesisWithPose()
-            # hypothesis.hypothesis.class_id = detection['class_id']
-            # hypothesis.hypothesis.score = detection['confidence']
-            # detection_2d.results.append(hypothesis)
+            # Set object hypothesis (Foxy vision_msgs: id and score fields)
+            hypothesis = ObjectHypothesisWithPose()
+            # Use class name as id for readability; fallback to class_id string
+            class_id_str = str(detection.get('class_name', detection.get('class_id', '')))
+            hypothesis.id = class_id_str
+            hypothesis.score = float(detection['confidence'])
+            detection_2d.results.append(hypothesis)
             
             detection_array.detections.append(detection_2d)
         
         self.detection_pub.publish(detection_array)
     
-    def display_image(self, cv_image):
+    def display_image(self, cv_image, detections=None):
         """
-        Display the image in a window.
+        Display the image in a window with optional detection overlays.
         
         Args:
             cv_image: OpenCV image (numpy array)
+            detections: List of detection results (optional)
         """
         try:
             # Add text overlay with image info
             display_image = cv_image.copy()
             height, width = display_image.shape[:2]
             
-            # Add image info text
-            info_text = f"Size: {width}x{height} | Topic: {self.image_topic}"
-            cv2.putText(display_image, info_text, (10, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            # Draw detection bounding boxes if provided
+            if detections:
+                for detection in detections:
+                    bbox = detection['bbox']
+                    class_name = detection['class_name']
+                    confidence = detection['confidence']
+                    
+                    # Draw bounding box
+                    x1, y1 = int(bbox['x1']), int(bbox['y1'])
+                    x2, y2 = int(bbox['x2']), int(bbox['y2'])
+                    
+                    # Choose color based on class (person = green, others = blue)
+                    color = (0, 255, 0) if class_name == 'person' else (255, 0, 0)
+                    
+                    cv2.rectangle(display_image, (x1, y1), (x2, y2), color, 2)
+                    
+                    # Add label with confidence
+                    label = f"{class_name}: {confidence:.2f}"
+                    label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+                    
+                    # Draw label background
+                    cv2.rectangle(display_image, (x1, y1 - label_size[1] - 10), 
+                                 (x1 + label_size[0], y1), color, -1)
+                    
+                    # Draw label text
+                    cv2.putText(display_image, label, (x1, y1 - 5), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
-            # Add transport type info
-            transport_text = f"Transport: {'compressed' if self.use_compressed else 'raw'}"
-            cv2.putText(display_image, transport_text, (10, 60), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            # # Add image info text
+            # info_text = f"Size: {width}x{height} | Topic: {self.image_topic}"
+            # cv2.putText(display_image, info_text, (10, 30), 
+            #            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
-            # Add window mode info
-            mode_text = f"Mode: {'Fullscreen' if self.window_fullscreen else 'Window'}"
-            cv2.putText(display_image, mode_text, (10, 90), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            # # Add transport type info
+            # transport_text = f"Transport: {'compressed' if self.use_compressed else 'raw'}"
+            # cv2.putText(display_image, transport_text, (10, 60), 
+            #            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
-            # Add keyboard controls info
-            controls_text = "Controls: F=Fullscreen, R=Resizable, Q/ESC=Quit"
-            cv2.putText(display_image, controls_text, (10, height - 20), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            # # Add window mode info
+            # mode_text = f"Mode: {'Fullscreen' if self.window_fullscreen else 'Window'}"
+            # cv2.putText(display_image, mode_text, (10, 90), 
+            #            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
+            # Add detection count info
+            if detections:
+                person_count = sum(1 for det in detections if det['class_name'] == 'person')
+                detection_text = f"Detections: {person_count} person(s), {len(detections)} total"
+                cv2.putText(display_image, detection_text, (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            
+            # # Add keyboard controls info
+            # controls_text = "Controls: F=Fullscreen, R=Resizable, Q/ESC=Quit"
+            # cv2.putText(display_image, controls_text, (10, height - 20), 
+            #            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             
             # Display the image
             cv2.imshow(self.window_name, display_image)

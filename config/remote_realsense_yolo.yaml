@@ -3,11 +3,10 @@
 remote_realsense_yolo_node:
   ros__parameters:
     # YOLO model parameters
-    yolo_model_path: "/path/to/yolo/model.weights"
-    yolo_config_path: "/path/to/yolo/model.cfg"
-    yolo_classes_path: "/path/to/yolo/classes.names"
-    confidence_threshold: 0.5
-    nms_threshold: 0.4
+    yolo_model: "yolo11n.pt"  # Ultralytics YOLO model
+    yolo_confidence: 0.5      # Detection confidence threshold
+    yolo_iou_threshold: 0.4   # IoU threshold for NMS
+    detect_person_only: true  # Focus on person detection
     
     # Camera parameters
     image_topic: "/remote/d455/color/image_raw/compressed"

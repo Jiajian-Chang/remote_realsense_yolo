@@ -27,6 +27,12 @@ def generate_launch_description():
         description='Path to the configuration file'
     )
     
+    log_level_arg = DeclareLaunchArgument(
+        'log_level',
+        default_value='info',
+        description='Log level (debug, info, warn, error)'
+    )
+    
     # Create the node
     remote_realsense_yolo_node = Node(
         package='remote_realsense_yolo',
@@ -34,9 +40,11 @@ def generate_launch_description():
         name='remote_realsense_yolo_node',
         output='screen',
         parameters=[LaunchConfiguration('config_file')],
+        arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
     )
     
     return LaunchDescription([
         config_file_arg,
+        log_level_arg,
         remote_realsense_yolo_node,
     ])
