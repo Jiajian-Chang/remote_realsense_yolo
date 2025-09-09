@@ -10,9 +10,15 @@ remote_realsense_yolo_node:
     nms_threshold: 0.4
     
     # Camera parameters
-    camera_topic: "/camera/color/image_raw"
-    image_width: 640
-    image_height: 480
+    image_topic: "/remote/d455/color/image_raw/compressed"
+    use_compressed: true
+    image_width: 424
+    image_height: 240
+    
+    # QoS parameters for compressed image
+    qos_reliability: "reliable"  # reliable or best_effort
+    qos_durability: "transient_local"  # volatile or transient_local
+    qos_depth: 10
     
     # Detection parameters
     publish_visualization: true
@@ -21,3 +27,9 @@ remote_realsense_yolo_node:
     # Performance parameters
     max_detection_fps: 30.0
     enable_gpu: false
+    
+    # Display parameters
+    show_image_window: true
+    window_name: "Remote RealSense YOLO"
+    window_fullscreen: false
+    window_resizable: true

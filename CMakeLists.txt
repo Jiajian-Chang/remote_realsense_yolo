@@ -17,7 +17,7 @@ find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
 
 # Install Python modules
-ament_python_install_package(${PROJECT_NAME})
+ament_python_install_package(src/${PROJECT_NAME})
 
 # Install Python executables
 install(PROGRAMS

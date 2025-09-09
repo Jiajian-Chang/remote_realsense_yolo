@@ -30,13 +30,10 @@ def generate_launch_description():
     # Create the node
     remote_realsense_yolo_node = Node(
         package='remote_realsense_yolo',
-        executable='remote_realsense_yolo_node',
+        executable='remote_realsense_yolo_node.py',
         name='remote_realsense_yolo_node',
         output='screen',
         parameters=[LaunchConfiguration('config_file')],
-        remappings=[
-            ('camera/image_raw', '/camera/color/image_raw'),
-        ]
     )
     
     return LaunchDescription([
