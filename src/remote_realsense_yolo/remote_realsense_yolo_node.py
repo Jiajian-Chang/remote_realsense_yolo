@@ -15,6 +15,8 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy
 from ultralytics import YOLO
 import cv2
 import numpy as np
+import os
+from pathlib import Path
 
 
 class RemoteRealSenseYOLONode(Node):
@@ -29,15 +31,10 @@ class RemoteRealSenseYOLONode(Node):
         self.declare_parameter('image_topic', '/camera/image_raw/compressed')
         self.declare_parameter('use_compressed', True)
         self.declare_parameter('yolo_model', 'yolo11n.pt')  # Ultralytics YOLO model
+        self.declare_parameter('yolo_model_cache_dir', '~/.cache/ultralytics')  # Model cache directory
         self.declare_parameter('yolo_confidence', 0.5)
         self.declare_parameter('yolo_iou_threshold', 0.4)
         self.declare_parameter('detect_person_only', True)  # Focus on person detection
-        self.declare_parameter('image_width', 640)
-        self.declare_parameter('image_height', 480)
-        self.declare_parameter('publish_visualization', True)
-        self.declare_parameter('visualization_topic', '/detections/visualization')
-        self.declare_parameter('max_detection_fps', 30.0)
-        self.declare_parameter('enable_gpu', False)
         self.declare_parameter('show_image_window', True)
         self.declare_parameter('window_name', 'Remote RealSense YOLO')
         self.declare_parameter('window_fullscreen', False)
@@ -121,17 +118,29 @@ class RemoteRealSenseYOLONode(Node):
 
     def init_yolo(self):
         """
-        Initialize Ultralytics YOLO model.
+        Initialize Ultralytics YOLO model with persistent cache.
         """
         try:
-            # Get YOLO model parameter
+            # Get YOLO model and cache directory parameters
             yolo_model = self.get_parameter('yolo_model').get_parameter_value().string_value
+            cache_dir = self.get_parameter('yolo_model_cache_dir').get_parameter_value().string_value
             
-            # Load YOLO model
+            # Expand user path and create cache directory if it doesn't exist
+            cache_path = Path(cache_dir).expanduser()
+            cache_path.mkdir(parents=True, exist_ok=True)
+            
+            # Set environment variable for Ultralytics cache
+            os.environ['ULTRALYTICS_CACHE_DIR'] = str(cache_path)
+            
+            self.get_logger().info(f'Using YOLO model cache directory: {cache_path}')
+            self.get_logger().info(f'Loading YOLO model: {yolo_model}')
+            
+            # Load YOLO model (will download to cache if not present)
             self.yolo_model = YOLO(yolo_model)
             
             self.yolo_initialized = True
             self.get_logger().info(f'YOLO model initialized successfully: {yolo_model}')
+            
         except Exception as e:
             self.get_logger().error(f'Failed to initialize YOLO: {str(e)}')
             self.yolo_initialized = False

@@ -4,28 +4,19 @@ remote_realsense_yolo_node:
   ros__parameters:
     # YOLO model parameters
     yolo_model: "yolo11n.pt"  # Ultralytics YOLO model
-    yolo_confidence: 0.5      # Detection confidence threshold
+    yolo_model_cache_dir: "~/.cache/ultralytics"  # Model cache directory
+    yolo_confidence: 0.7      # Detection confidence threshold
     yolo_iou_threshold: 0.4   # IoU threshold for NMS
     detect_person_only: true  # Focus on person detection
     
     # Camera parameters
     image_topic: "/remote/d455/color/image_raw/compressed"
     use_compressed: true
-    image_width: 424
-    image_height: 240
     
     # QoS parameters for compressed image
     qos_reliability: "reliable"  # reliable or best_effort
     qos_durability: "transient_local"  # volatile or transient_local
     qos_depth: 10
-    
-    # Detection parameters
-    publish_visualization: true
-    visualization_topic: "/detections/visualization"
-    
-    # Performance parameters
-    max_detection_fps: 30.0
-    enable_gpu: false
     
     # Display parameters
     show_image_window: true
